@@ -2,7 +2,7 @@ name: Daily Scrum Slack Notification
 
 on:
   schedule:
-    - cron: '0 11 * * 1-5'  # 한국 시간 오후 8시 (UTC 11:00), 평일만
+    - cron: '0 0 * * *' # 매일 오전 9시 (UTC 00:00)
 
 jobs:
   notify:
