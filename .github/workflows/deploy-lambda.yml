@@ -139,8 +139,8 @@ jobs:
           if aws scheduler get-schedule --name "$schedule_name" --region "$AWS_REGION" >/dev/null 2>&1; then
             aws scheduler update-schedule \
               --name "$schedule_name" \
-              --description "Daily 10:00 KST deployment-managed scrum reminder" \
-              --schedule-expression "cron(10 0 * * ? *)" \
+              --description "Daily 10:01 KST deployment-managed scrum reminder" \
+              --schedule-expression "cron(10 01 * * ? *)" \
               --schedule-expression-timezone "Asia/Seoul" \
               --flexible-time-window '{"Mode":"OFF"}' \
               --target "$target" \
@@ -150,8 +150,8 @@ jobs:
           else
             aws scheduler create-schedule \
               --name "$schedule_name" \
-              --description "Daily 10:00 KST deployment-managed scrum reminder" \
-              --schedule-expression "cron(10 0 * * ? *)" \
+              --description "Daily 10:01 KST deployment-managed scrum reminder" \
+              --schedule-expression "cron(10 01 * * ? *)" \
               --schedule-expression-timezone "Asia/Seoul" \
               --flexible-time-window '{"Mode":"OFF"}' \
               --target "$target" \
