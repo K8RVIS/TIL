@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Send Daily Scrum Reminder to Slack
         run: |
-          curl -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
+          curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
             -d '{
               "text": " *데일리 스크럼 시간입니다!* (오전 10시 10분)",

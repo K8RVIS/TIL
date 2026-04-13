@@ -1,0 +1,171 @@
+name: Deploy Daily Scrum Lambda
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/deploy-lambda.yml'
+      - 'main.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: til-daily-scrum-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+      FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+      LAMBDA_EXECUTION_ROLE_ARN: ${{ vars.LAMBDA_EXECUTION_ROLE_ARN }}
+      SCHEDULER_ROLE_ARN: ${{ vars.EVENTBRIDGE_SCHEDULER_ROLE_ARN }}
+      SCHEDULER_NAME: ${{ vars.SCHEDULER_NAME }}
+      POST_DEPLOY_SMOKE_TEST: ${{ vars.POST_DEPLOY_SMOKE_TEST }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate deployment configuration
+        run: |
+          set -euo pipefail
+
+          required_vars=(
+            AWS_REGION
+            AWS_ACCOUNT_ID
+            AWS_ROLE_TO_ASSUME
+            FUNCTION_NAME
+            LAMBDA_EXECUTION_ROLE_ARN
+            SCHEDULER_ROLE_ARN
+            SLACK_WEBHOOK_URL
+          )
+
+          for name in "${required_vars[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::$name is required for deployment."
+              exit 1
+            fi
+          done
+
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          role-session-name: github-actions-til-daily-scrum
+
+      - name: Package Lambda zip
+        run: |
+          set -euo pipefail
+          zip -j function.zip main.py
+
+      - name: Create or update Lambda function
+        run: |
+          set -euo pipefail
+
+          if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            aws lambda update-function-code \
+              --function-name "$FUNCTION_NAME" \
+              --zip-file fileb://function.zip \
+              --region "$AWS_REGION" >/dev/null
+
+            aws lambda wait function-updated \
+              --function-name "$FUNCTION_NAME" \
+              --region "$AWS_REGION"
+
+            aws lambda update-function-configuration \
+              --function-name "$FUNCTION_NAME" \
+              --role "$LAMBDA_EXECUTION_ROLE_ARN" \
+              --runtime python3.12 \
+              --handler main.lambda_handler \
+              --timeout 10 \
+              --memory-size 128 \
+              --environment "Variables={SLACK_WEBHOOK_URL=$SLACK_WEBHOOK_URL}" \
+              --region "$AWS_REGION" >/dev/null
+
+            aws lambda wait function-updated \
+              --function-name "$FUNCTION_NAME" \
+              --region "$AWS_REGION"
+          else
+            aws lambda create-function \
+              --function-name "$FUNCTION_NAME" \
+              --runtime python3.12 \
+              --handler main.lambda_handler \
+              --zip-file fileb://function.zip \
+              --role "$LAMBDA_EXECUTION_ROLE_ARN" \
+              --architectures x86_64 \
+              --timeout 10 \
+              --memory-size 128 \
+              --environment "Variables={SLACK_WEBHOOK_URL=$SLACK_WEBHOOK_URL}" \
+              --region "$AWS_REGION" >/dev/null
+
+            aws lambda wait function-active \
+              --function-name "$FUNCTION_NAME" \
+              --region "$AWS_REGION"
+          fi
+
+      - name: Create or update EventBridge Scheduler
+        run: |
+          set -euo pipefail
+          schedule_name="${SCHEDULER_NAME:-${FUNCTION_NAME}-daily}"
+          lambda_arn="arn:aws:lambda:$AWS_REGION:$AWS_ACCOUNT_ID:function:$FUNCTION_NAME"
+          target="Arn=$lambda_arn,RoleArn=$SCHEDULER_ROLE_ARN"
+
+          if aws scheduler get-schedule --name "$schedule_name" --region "$AWS_REGION" >/dev/null 2>&1; then
+            aws scheduler update-schedule \
+              --name "$schedule_name" \
+              --description "Daily 10:00 KST deployment-managed scrum reminder" \
+              --schedule-expression "cron(10 0 * * ? *)" \
+              --schedule-expression-timezone "Asia/Seoul" \
+              --flexible-time-window '{"Mode":"OFF"}' \
+              --target "$target" \
+              --state ENABLED \
+              --action-after-completion NONE \
+              --region "$AWS_REGION" >/dev/null
+          else
+            aws scheduler create-schedule \
+              --name "$schedule_name" \
+              --description "Daily 10:00 KST deployment-managed scrum reminder" \
+              --schedule-expression "cron(10 0 * * ? *)" \
+              --schedule-expression-timezone "Asia/Seoul" \
+              --flexible-time-window '{"Mode":"OFF"}' \
+              --target "$target" \
+              --state ENABLED \
+              --action-after-completion NONE \
+              --region "$AWS_REGION" >/dev/null
+          fi
+
+      - name: Optional smoke test Lambda invocation
+        if: ${{ env.POST_DEPLOY_SMOKE_TEST == 'true' }}
+        run: |
+          set -euo pipefail
+          aws lambda invoke \
+            --function-name "$FUNCTION_NAME" \
+            --region "$AWS_REGION" \
+            response.json >/dev/null
+          cat response.json
