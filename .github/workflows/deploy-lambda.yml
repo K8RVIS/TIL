@@ -140,7 +140,7 @@ jobs:
             aws scheduler update-schedule \
               --name "$schedule_name" \
               --description "Daily 10:01 KST deployment-managed scrum reminder" \
-              --schedule-expression "cron(10 01 * * ? *)" \
+              --schedule-expression "cron(01 10 * * ? *)" \
               --schedule-expression-timezone "Asia/Seoul" \
               --flexible-time-window '{"Mode":"OFF"}' \
               --target "$target" \
@@ -151,7 +151,7 @@ jobs:
             aws scheduler create-schedule \
               --name "$schedule_name" \
               --description "Daily 10:01 KST deployment-managed scrum reminder" \
-              --schedule-expression "cron(10 01 * * ? *)" \
+              --schedule-expression "cron(01 10 * * ? *)" \
               --schedule-expression-timezone "Asia/Seoul" \
               --flexible-time-window '{"Mode":"OFF"}' \
               --target "$target" \
